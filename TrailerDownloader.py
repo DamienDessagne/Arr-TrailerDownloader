@@ -153,11 +153,8 @@ def get_audio_codec_info(file_path):
     return audio_codec
 
 
-# Re-encodes the video using ffmpeg based on the re-encoding rules.
+# Re-encodes the video using ffmpeg based on the re-encoding rules and encoding parameters.
 def reencode_video(input_file, output_file):
-    """
-    Re-encodes the video using ffmpeg based on the re-encoding rules and encoding parameters.
-    """
     video_codec = get_video_codec_info(input_file)
     audio_codec = get_audio_codec_info(input_file)
 
