@@ -161,7 +161,7 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
             info_dict = ydl.extract_info(f"https://www.youtube.com/watch?v={yt_video_id}", download=True)
             temp_filename = ydl.prepare_filename(info_dict)
         output_filename = temp_filename.replace(TEMP_DIR, folder_path)
-        log(f"Copying trailer to its destination ...");
+        log(f"Moving trailer to its destination ...")
         shutil.move(temp_filename, output_filename)
         log(f"Trailer successfully downloaded and saved to {os.path.join(folder_path, output_filename)}")
         return 1
