@@ -25,6 +25,12 @@ YOUTUBE_API_KEY = config.get('CONFIG', 'YOUTUBE_API_KEY')
 # Browser name to get cookies from to download from YouTube. See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp for details
 YT_DLP_COOKIES_BROWSER = config.get('CONFIG', 'yt_dlp_cookies_browser')
 
+# Video codec to re-encode trailers to
+REENCODE_VIDEO_CODEC = config.get('CONFIG', 'reencode_video_codec')
+
+# Audio codec to re-encode trailers to
+REENCODE_AUDIO_CODEC = config.get('CONFIG', 'reencode_audio_codec')
+
 # Language-dependant parameters to search for trailers on Youtube
 YOUTUBE_PARAMS = {"default": {
     "use_original_movie_name": config.getboolean('YOUTUBE_PARAMS.default', 'use_original_movie_name'),
@@ -125,10 +131,20 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
     # Download trailer using yt-dlp
     log("Downloading video...")
     ydl_opts = {
-        'outtmpl': os.path.join(folder_path, f"{title} ({year})-Trailer.%(ext)s"),
-        'format': 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b',
+        "outtmpl": os.path.join(folder_path, f"{title} ({year})-Trailer.%(ext)s"),
+        "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
     }
-    if YT_DLP_COOKIES_BROWSER != '':
+    if REENCODE_VIDEO_CODEC or REENCODE_AUDIO_CODEC:
+        ydl_opts.postprocessors = [
+            {"key": "FFmpegCopyStream"},
+        ]
+        ydl_opts.postprocessor_args = {
+            "copystream": [
+                "-c:v", REENCODE_VIDEO_CODEC if REENCODE_VIDEO_CODEC else "copy", "-c:a", REENCODE_AUDIO_CODEC if REENCODE_AUDIO_CODEC else "copy"
+            ],
+        }
+
+    if YT_DLP_COOKIES_BROWSER != "":
         ydl_opts["cookiesfrombrowser"] = (YT_DLP_COOKIES_BROWSER, None, None, None)
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
