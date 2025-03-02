@@ -26,10 +26,10 @@ YOUTUBE_API_KEY = config.get('CONFIG', 'YOUTUBE_API_KEY')
 YT_DLP_COOKIES_BROWSER = config.get('CONFIG', 'yt_dlp_cookies_browser')
 
 # Video codec to re-encode trailers to
-REENCODE_VIDEO_CODEC = config.get('CONFIG', 'reencode_video_codec')
+REENCODE_VIDEO_CODEC = config.get('CONFIG', 'reencode_video_codec', fallback=None)
 
 # Audio codec to re-encode trailers to
-REENCODE_AUDIO_CODEC = config.get('CONFIG', 'reencode_audio_codec')
+REENCODE_AUDIO_CODEC = config.get('CONFIG', 'reencode_audio_codec', fallback=None)
 
 # Language-dependant parameters to search for trailers on Youtube
 YOUTUBE_PARAMS = {"default": {
@@ -134,15 +134,17 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
         "outtmpl": os.path.join(folder_path, f"{title} ({year})-Trailer.%(ext)s"),
         "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
     }
-    if REENCODE_VIDEO_CODEC or REENCODE_AUDIO_CODEC:
-        ydl_opts.postprocessors = [
+    if REENCODE_VIDEO_CODEC is not None or REENCODE_AUDIO_CODEC is not None:
+        ydl_opts["postprocessors"] = [
             {"key": "FFmpegCopyStream"},
         ]
-        ydl_opts.postprocessor_args = {
+        ydl_opts["postprocessor_args"] = {
             "copystream": [
-                "-c:v", REENCODE_VIDEO_CODEC if REENCODE_VIDEO_CODEC else "copy", "-c:a", REENCODE_AUDIO_CODEC if REENCODE_AUDIO_CODEC else "copy"
+                "-c:v", REENCODE_VIDEO_CODEC if REENCODE_VIDEO_CODEC is not None else "copy",
+                "-c:a", REENCODE_AUDIO_CODEC if REENCODE_AUDIO_CODEC is not None else "copy"
             ],
         }
+        print(f"{ydl_opts}")
 
     if YT_DLP_COOKIES_BROWSER != "":
         ydl_opts["cookiesfrombrowser"] = (YT_DLP_COOKIES_BROWSER, None, None, None)
