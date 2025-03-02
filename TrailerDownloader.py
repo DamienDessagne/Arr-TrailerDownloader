@@ -1,11 +1,21 @@
 import os
 import re
+import shutil
 import sys
 import requests
 from urllib.parse import quote
 from datetime import datetime
 import yt_dlp
 import configparser
+
+# Set current directory to script location
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+# Temp directory for YT-DLP to download files into
+TEMP_DIR = "Temp"
+if os.path.exists(TEMP_DIR):
+    shutil.rmtree(TEMP_DIR)
+os.mkdir(TEMP_DIR)
 
 ############################# CONFIG #############################
 
@@ -47,9 +57,6 @@ for section in config.sections():
         }
 
 ############################# LOG #############################
-
-# Set current directory to script location
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # Create a new log file
 LOG_FOLDER_NAME = "Logs"
@@ -131,7 +138,7 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
     # Download trailer using yt-dlp
     log("Downloading video...")
     ydl_opts = {
-        "outtmpl": os.path.join(folder_path, f"{title} ({year})-Trailer.%(ext)s"),
+        "outtmpl": os.path.join(TEMP_DIR, f"{title} ({year})-Trailer.%(ext)s"),
         "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
     }
     if REENCODE_VIDEO_CODEC is not None or REENCODE_AUDIO_CODEC is not None:
@@ -150,7 +157,10 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(f"https://www.youtube.com/watch?v={yt_video_id}", download=True)
-            output_filename = ydl.prepare_filename(info_dict)
+            temp_filename = ydl.prepare_filename(info_dict)
+        output_filename = temp_filename.replace(TEMP_DIR, folder_path)
+        log(f"Copying trailer to its destination ...");
+        shutil.move(temp_filename, output_filename)
         log(f"Trailer successfully downloaded and saved to {os.path.join(folder_path, output_filename)}")
         return 1
     except Exception as e:
