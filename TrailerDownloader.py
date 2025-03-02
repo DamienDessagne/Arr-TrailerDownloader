@@ -183,8 +183,10 @@ def download_trailers_for_library(library_root_path):
                     if match:
                         tmdb_id = match[4]
 
-                # Download the trailer
-                downloaded_trailers_count += get_youtube_trailer(title, year, dir_path, tmdb_id, is_movie)
+                    # Download the trailer
+                    downloaded_trailers_count += get_youtube_trailer(title, year, dir_path, tmdb_id, is_movie)
+                else:
+                    log(f"No movie file found for {dir_name}, skipping")
             else:
                 log(f"Invalid name format: {dir_name}, expecting 'title (year)', skipping")
 
