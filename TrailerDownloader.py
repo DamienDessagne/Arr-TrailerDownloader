@@ -14,32 +14,32 @@ config = configparser.ConfigParser()
 config.read(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini'))
 
 # Whether to log everything the script does
-LOG_ACTIVITY = config.getboolean('CONFIG', 'LOG_ACTIVITY')
+LOG_ACTIVITY = config.getboolean('Config', 'log_activity')
 
 # Your TMDB API key, if not provided, language-dependant features won't be activated
-TMDB_API_KEY = config.get('CONFIG', 'TMDB_API_KEY')
+TMDB_API_KEY = config.get('Config', 'tmdb_api_key')
 
 # Youtube API key (see https://developers.google.com/youtube/v3/getting-started)
-YOUTUBE_API_KEY = config.get('CONFIG', 'YOUTUBE_API_KEY')
+YOUTUBE_API_KEY = config.get('Config', 'youtube_api_key')
 
 # Browser name to get cookies from to download from YouTube. See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp for details
-YT_DLP_COOKIES_BROWSER = config.get('CONFIG', 'yt_dlp_cookies_browser')
+YT_DLP_COOKIES_BROWSER = config.get('Config', 'yt_dlp_cookies_browser')
 
 # Video codec to re-encode trailers to
-REENCODE_VIDEO_CODEC = config.get('CONFIG', 'reencode_video_codec', fallback=None)
+REENCODE_VIDEO_CODEC = config.get('Config', 'reencode_video_codec', fallback=None)
 
 # Audio codec to re-encode trailers to
-REENCODE_AUDIO_CODEC = config.get('CONFIG', 'reencode_audio_codec', fallback=None)
+REENCODE_AUDIO_CODEC = config.get('Config', 'reencode_audio_codec', fallback=None)
 
 # Language-dependant parameters to search for trailers on Youtube
 YOUTUBE_PARAMS = {"default": {
-    "use_original_movie_name": config.getboolean('YOUTUBE_PARAMS.default', 'use_original_movie_name'),
-    "search_keywords": config.get('YOUTUBE_PARAMS.default', 'search_keywords')
+    "use_original_movie_name": config.getboolean('YoutubeParams.default', 'use_original_movie_name'),
+    "search_keywords": config.get('YoutubeParams.default', 'search_keywords')
 }}
 
 # Load language-specific parameters
 for section in config.sections():
-    if section.startswith('YOUTUBE_PARAMS.') and section != 'YOUTUBE_PARAMS.default':
+    if section.startswith('YoutubeParams.') and section != 'YoutubeParams.default':
         language_code = section.split('.')[1]  # Extract language code (e.g., 'fr' from 'YOUTUBE_PARAMS.fr')
         YOUTUBE_PARAMS[language_code] = {
             "use_original_movie_name": config.getboolean(section, 'use_original_movie_name'),
