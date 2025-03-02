@@ -8,6 +8,7 @@ from urllib.parse import quote
 from datetime import datetime
 import yt_dlp
 import configparser
+import subprocess
 
 # Set current directory to script location
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -15,9 +16,9 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # Temp directory for YT-DLP to download files into
 TEMP_DIR = "Temp"
 if os.path.exists(TEMP_DIR):
-    os.chmod(TEMP_DIR, stat.S_IWRITE)
     shutil.rmtree(TEMP_DIR)
 os.mkdir(TEMP_DIR)
+os.chmod(TEMP_DIR, stat.S_IWRITE)
 
 ############################# CONFIG #############################
 
@@ -37,12 +38,6 @@ YOUTUBE_API_KEY = config.get('Config', 'youtube_api_key')
 # Browser name to get cookies from to download from YouTube. See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp for details
 YT_DLP_COOKIES_BROWSER = config.get('Config', 'yt_dlp_cookies_browser')
 
-# Video codec to re-encode trailers to
-REENCODE_VIDEO_CODEC = config.get('Config', 'reencode_video_codec', fallback=None)
-
-# Audio codec to re-encode trailers to
-REENCODE_AUDIO_CODEC = config.get('Config', 'reencode_audio_codec', fallback=None)
-
 # Language-dependant parameters to search for trailers on Youtube
 YOUTUBE_PARAMS = {"default": {
     "use_original_movie_name": config.getboolean('YoutubeParams.default', 'use_original_movie_name'),
@@ -58,6 +53,29 @@ for section in config.sections():
             "search_keywords": config.get(section, 'search_keywords')
         }
 
+# Load re-encoding rules from config
+REENCODE_RULES = {}
+if config.has_section('ReencodeRules'):
+    for key, value in config.items('ReencodeRules'):
+        codec_type, source_codec = key.split('.')
+        if codec_type not in REENCODE_RULES:
+            REENCODE_RULES[codec_type] = {}
+        REENCODE_RULES[codec_type][source_codec] = value
+
+# Load encoding parameters from config
+ENCODING_PARAMS = {}
+if config.has_section('EncodingParams'):
+    for key, value in config.items('EncodingParams'):
+        parts = key.split('.')
+        if len(parts) == 3:  # Format: codec_type.target_codec.param
+            codec_type, target_codec, param = parts
+            if codec_type not in ENCODING_PARAMS:
+                ENCODING_PARAMS[codec_type] = {}
+            if target_codec not in ENCODING_PARAMS[codec_type]:
+                ENCODING_PARAMS[codec_type][target_codec] = {}
+            ENCODING_PARAMS[codec_type][target_codec][param] = value
+
+
 ############################# LOG #############################
 
 # Create a new log file
@@ -68,12 +86,14 @@ if LOG_ACTIVITY and not os.path.exists(LOG_FOLDER_NAME):
 LOG_FILE_NAME = datetime.now().strftime("%Y%m%d_%H%M%S") + ".txt"
 LOG_FILE_PATH = os.path.join(LOG_FOLDER_NAME, LOG_FILE_NAME)
 
+
 # Echoes the given text and appends the given text to the log file's content
 def log(log_text):
     print(log_text)
     if LOG_ACTIVITY:
         with open(LOG_FILE_PATH, "a", encoding="utf-8") as log_file:
             log_file.write(log_text + "\n")
+
 
 ############################# JSON #############################
 
@@ -83,6 +103,7 @@ def fetch_json(url):
     response = requests.get(url)
     response.raise_for_status()
     return response.json()
+
 
 ############################# TMDB #############################
 
@@ -99,6 +120,7 @@ def get_tmbd_id(title, year, is_movie):
         return tmdb_search_results["results"][0]["id"]
     return None
 
+
 # Returns the JSON info on TMDB for the given movie ID. If no info can be found, None is returned
 def get_tmdb_info(tmdb_id, is_movie):
     if TMDB_API_KEY == "YOUR_API_KEY" or tmdb_id is None:
@@ -107,10 +129,79 @@ def get_tmdb_info(tmdb_id, is_movie):
     log(f"Querying TMDB for details of {"Movie" if is_movie else "TV Show"} #{tmdb_id} ...")
     return fetch_json(f"https://api.themoviedb.org/3/{"movie" if is_movie else "tv"}/{tmdb_id}?api_key={TMDB_API_KEY}")
 
+
+############################# FFMPEG #############################
+
+# Uses ffprobe to extract the video codec from the given file
+def get_video_codec_info(file_path):
+    cmd = [
+        'ffprobe', '-v', 'error', '-select_streams', 'v:0',
+        '-show_entries', 'stream=codec_name', '-of', 'default=nw=1:nk=1', file_path
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    video_codec = result.stdout.decode().strip()
+    return video_codec
+
+# Uses ffprobe to extract the audio codec from the given file
+def get_audio_codec_info(file_path):
+    cmd = [
+        'ffprobe', '-v', 'error', '-select_streams', 'a:0',
+        '-show_entries', 'stream=codec_name', '-of', 'default=nw=1:nk=1', file_path
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    audio_codec = result.stdout.decode().strip()
+    return audio_codec
+
+
+# Re-encodes the video using ffmpeg based on the re-encoding rules.
+def reencode_video(input_file, output_file):
+    """
+    Re-encodes the video using ffmpeg based on the re-encoding rules and encoding parameters.
+    """
+    video_codec = get_video_codec_info(input_file)
+    audio_codec = get_audio_codec_info(input_file)
+
+    # Determine target codecs based on re-encoding rules
+    target_video_codec = REENCODE_RULES.get('video', {}).get(video_codec, 'copy')
+    target_audio_codec = REENCODE_RULES.get('audio', {}).get(audio_codec, 'copy')
+
+    # Skip re-encoding if no changes are needed
+    if target_video_codec == 'copy' and target_audio_codec == 'copy':
+        log("No re-encoding needed.")
+        return False
+
+    # Build ffmpeg command
+    ffmpeg_cmd = ['ffmpeg', '-i', input_file]
+
+    # Add video encoding parameters
+    ffmpeg_cmd.extend(['-c:v', target_video_codec])
+    if target_video_codec != 'copy':
+        video_params = ENCODING_PARAMS.get('video', {}).get(target_video_codec, {})
+        for param, value in video_params.items():
+            ffmpeg_cmd.extend([f'-{param}', value])
+
+    # Add audio encoding parameters
+    ffmpeg_cmd.extend(['-c:a', target_audio_codec])
+    if target_audio_codec != 'copy':
+        audio_params = ENCODING_PARAMS.get('audio', {}).get(target_audio_codec, {})
+        for param, value in audio_params.items():
+            ffmpeg_cmd.extend([f'-{param}', value])
+
+    ffmpeg_cmd.extend(['-y', output_file])  # Overwrite output file if it exists
+
+    log(f"Running ffmpeg command: {' '.join(ffmpeg_cmd)}")
+    try:
+        subprocess.run(ffmpeg_cmd, check=True)
+        log(f"Re-encoding successful: {output_file}")
+        return True
+    except subprocess.CalledProcessError as e:
+        log(f"Failed to re-encode video: {e}")
+        return False
+
+
 ############################# YOUTUBE #############################
 
 def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
-
     # Gather data from TMDB
     if tmdb_id is None:
         tmdb_id = get_tmbd_id(title, year, is_movie)
@@ -143,24 +234,25 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
         "outtmpl": os.path.join(TEMP_DIR, f"{title} ({year})-Trailer.%(ext)s"),
         "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
     }
-    if REENCODE_VIDEO_CODEC is not None or REENCODE_AUDIO_CODEC is not None:
-        ydl_opts["postprocessors"] = [
-            {"key": "FFmpegCopyStream"},
-        ]
-        ydl_opts["postprocessor_args"] = {
-            "copystream": [
-                "-c:v", REENCODE_VIDEO_CODEC if REENCODE_VIDEO_CODEC is not None else "copy",
-                "-c:a", REENCODE_AUDIO_CODEC if REENCODE_AUDIO_CODEC is not None else "copy"
-            ],
-        }
 
     if YT_DLP_COOKIES_BROWSER != "":
         ydl_opts["cookiesfrombrowser"] = (YT_DLP_COOKIES_BROWSER, None, None, None)
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(f"https://www.youtube.com/watch?v={yt_video_id}", download=True)
             temp_filename = ydl.prepare_filename(info_dict)
         output_filename = temp_filename.replace(TEMP_DIR, folder_path)
+
+        # Re-encode the video if necessary
+        reencoded_filename = os.path.join(TEMP_DIR, f"{title} ({year})-Trailer-reencoded.mp4")
+        if reencode_video(temp_filename, reencoded_filename):
+            os.remove(temp_filename)
+            temp_filename = reencoded_filename  # Use the re-encoded file
+        else:
+            log("Re-encoding not needed or failed, using original file.")
+
+        # Move the trailer to its destination
         log(f"Moving trailer to its destination ...")
         shutil.move(temp_filename, output_filename)
         log(f"Trailer successfully downloaded and saved to {os.path.join(folder_path, output_filename)}")
@@ -168,6 +260,7 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
     except Exception as e:
         log(f"Failed to download trailer: {e}")
         return 0
+
 
 ############################# LIBRARY PROCESSING #############################
 
@@ -222,9 +315,7 @@ def download_trailers_for_library(library_root_path):
     log(f"Successfully downloaded {downloaded_trailers_count} new trailers.")
 
 
-
 ############################# MAIN #############################
-
 
 
 def main():
@@ -238,7 +329,8 @@ def main():
                 sys.exit(1)
             log("Test successful")
 
-        if (os.environ["radarr_eventtype"] == "Download" and os.environ["radarr_isupgrade"] == "False") or os.environ["radarr_eventtype"] == "Rename":
+        if (os.environ["radarr_eventtype"] == "Download" and os.environ["radarr_isupgrade"] == "False") or os.environ[
+            "radarr_eventtype"] == "Rename":
             get_youtube_trailer(
                 os.environ["radarr_movie_title"],
                 os.environ["radarr_movie_year"],
@@ -259,7 +351,8 @@ def main():
                 sys.exit(1)
             log("Test successful")
 
-        if (os.environ["sonarr_eventtype"] == "Download" and os.environ["sonarr_isupgrade"] == "False") or os.environ["sonarr_eventtype"] == "Rename":
+        if (os.environ["sonarr_eventtype"] == "Download" and os.environ["sonarr_isupgrade"] == "False") or os.environ[
+            "sonarr_eventtype"] == "Rename":
             get_youtube_trailer(
                 os.environ["sonarr_series_title"],
                 os.environ["sonarr_series_year"],
@@ -280,6 +373,7 @@ def main():
         sys.exit(1)
 
     download_trailers_for_library(sys.argv[1])
+
 
 if __name__ == "__main__":
     main()
