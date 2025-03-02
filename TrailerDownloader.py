@@ -144,7 +144,6 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
                 "-c:a", REENCODE_AUDIO_CODEC if REENCODE_AUDIO_CODEC is not None else "copy"
             ],
         }
-        print(f"{ydl_opts}")
 
     if YT_DLP_COOKIES_BROWSER != "":
         ydl_opts["cookiesfrombrowser"] = (YT_DLP_COOKIES_BROWSER, None, None, None)
