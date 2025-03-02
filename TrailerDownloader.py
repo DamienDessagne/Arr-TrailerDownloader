@@ -1,4 +1,5 @@
 import os
+import stat
 import re
 import shutil
 import sys
@@ -14,6 +15,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # Temp directory for YT-DLP to download files into
 TEMP_DIR = "Temp"
 if os.path.exists(TEMP_DIR):
+    os.chmod(TEMP_DIR, stat.S_IWRITE)
     shutil.rmtree(TEMP_DIR)
 os.mkdir(TEMP_DIR)
 
