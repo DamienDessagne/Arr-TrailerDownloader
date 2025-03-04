@@ -285,28 +285,30 @@ def download_trailers_for_library(library_root_path):
             log(f'Downloading a trailer for "{dir_name}" ...')
 
             # Extract title and year from the folder name
-            match = re.match(r"(.*)\s\((\d{4})\)", dir_name)
+            match = re.match(r"(.*)\s\((\d{4})\)(?:\s+)?({tvdb-\d+})?", dir_name)
             if match:
-                title, year = match.groups()
+                title, year, tvdb_id = match.groups()
                 tmdb_id = None
-                is_movie = False
 
-                # Find the largest file in the directory
-                video_files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))]
-                if video_files:
-                    is_movie = True
-                    video_file = max(video_files, key=lambda f: os.path.getsize(os.path.join(dir_path, f)))
-                    video_file_base = os.path.splitext(video_file)[0]
-
-                    # Extract TMDB ID from the filename if available
-                    match = re.match(r"(.*)\s\((\d{4})\)(.*tmdb-(\d+).*|.*)", video_file_base)
-                    if match:
-                        tmdb_id = match[4]
-
-                    # Download the trailer
-                    downloaded_trailers_count += get_youtube_trailer(title, year, dir_path, tmdb_id, is_movie)
+                if tvdb_id is not None:
+                    # Download the TV show trailer
+                    downloaded_trailers_count += get_youtube_trailer(title, year, dir_path, tmdb_id, False)
                 else:
-                    log(f"No movie file found for {dir_name}, skipping")
+                    # Find the largest file in the directory
+                    video_files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))]
+                    if video_files:
+                        video_file = max(video_files, key=lambda f: os.path.getsize(os.path.join(dir_path, f)))
+                        video_file_base = os.path.splitext(video_file)[0]
+
+                        # Extract TMDB ID from the filename if available
+                        match = re.match(r"(.*)\s\((\d{4})\)(.*tmdb-(\d+).*|.*)", video_file_base)
+                        if match:
+                            tmdb_id = match[4]
+
+                        # Download the trailer
+                        downloaded_trailers_count += get_youtube_trailer(title, year, dir_path, tmdb_id, True)
+                    else:
+                        log(f"No movie file found for {dir_name}, skipping")
             else:
                 log(f"Invalid name format: {dir_name}, expecting 'title (year)', skipping")
 
