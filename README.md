@@ -3,7 +3,7 @@ A Python script that downloads trailers from Youtube for a Radarr/Sonarr librari
 
 # Requirements
 - [Python](https://www.python.org/downloads/)
-- Highly recommended: download [ffmpeg](https://www.ffmpeg.org/) and add its `bin` folder to your PATH environment variable. Youtube now has separated audio and video for almost all its videos, this will ensure the script can combine them in a single trailer file with video and audio.
+- FFMpeg: download [ffmpeg](https://www.ffmpeg.org/) and add its `bin` folder to your PATH environment variable.
 
 # Installation
 - Download and extract in a directory of your choice, visible to your **Radarr/Sonarr** installation.
