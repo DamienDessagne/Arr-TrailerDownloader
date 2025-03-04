@@ -1,5 +1,4 @@
 import os
-import stat
 import re
 import shutil
 import sys
@@ -9,17 +8,10 @@ from datetime import datetime
 import yt_dlp
 import configparser
 import subprocess
+import tempfile
 
 # Set current directory to script location
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
-# Temp directory for YT-DLP to download files into
-TEMP_DIR = "Temp"
-if os.path.exists(TEMP_DIR):
-    os.chmod(TEMP_DIR, stat.S_IWRITE)
-    shutil.rmtree(TEMP_DIR)
-os.mkdir(TEMP_DIR)
-os.chmod(TEMP_DIR, stat.S_IWRITE)
 
 ############################# CONFIG #############################
 
@@ -226,38 +218,42 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
 
     yt_video_id = yt_search_results["items"][0]["id"]["videoId"]
 
-    # Download trailer using yt-dlp
-    log("Downloading video...")
-    ydl_opts = {
-        "outtmpl": os.path.join(TEMP_DIR, f"{title} ({year})-Trailer.%(ext)s"),
-        "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
-    }
+    # Create a temporary directory for working in
+    with tempfile.TemporaryDirectory() as TEMP_DIR:
+        log(f"Created temporary directory: {TEMP_DIR}")
 
-    if YT_DLP_COOKIES_BROWSER != "":
-        ydl_opts["cookiesfrombrowser"] = (YT_DLP_COOKIES_BROWSER, None, None, None)
+        # Download trailer using yt-dlp
+        log("Downloading video...")
+        ydl_opts = {
+            "outtmpl": os.path.join(TEMP_DIR, f"{title} ({year})-Trailer.%(ext)s"),
+            "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
+        }
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(f"https://www.youtube.com/watch?v={yt_video_id}", download=True)
-            temp_filename = ydl.prepare_filename(info_dict)
-        output_filename = temp_filename.replace(TEMP_DIR, folder_path)
+        if YT_DLP_COOKIES_BROWSER != "":
+            ydl_opts["cookiesfrombrowser"] = (YT_DLP_COOKIES_BROWSER, None, None, None)
 
-        # Re-encode the video if necessary
-        reencoded_filename = os.path.join(TEMP_DIR, f"{title} ({year})-Trailer-reencoded.mp4")
-        if reencode_video(temp_filename, reencoded_filename):
-            os.remove(temp_filename)
-            temp_filename = reencoded_filename  # Use the re-encoded file
-        else:
-            log("Re-encoding not needed or failed, using original file.")
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info_dict = ydl.extract_info(f"https://www.youtube.com/watch?v={yt_video_id}", download=True)
+                temp_filename = ydl.prepare_filename(info_dict)
+            output_filename = temp_filename.replace(TEMP_DIR, folder_path)
 
-        # Move the trailer to its destination
-        log(f"Moving trailer to its destination ...")
-        shutil.move(temp_filename, output_filename)
-        log(f"Trailer successfully downloaded and saved to {os.path.join(folder_path, output_filename)}")
-        return 1
-    except Exception as e:
-        log(f"Failed to download trailer: {e}")
-        return 0
+            # Re-encode the video if necessary
+            reencoded_filename = os.path.join(TEMP_DIR, f"{title} ({year})-Trailer-reencoded.mp4")
+            if reencode_video(temp_filename, reencoded_filename):
+                os.remove(temp_filename)
+                temp_filename = reencoded_filename  # Use the re-encoded file
+            else:
+                log("Re-encoding not needed or failed, using original file.")
+
+            # Move the trailer to its destination
+            log(f"Moving trailer to its destination ...")
+            shutil.move(temp_filename, output_filename)
+            log(f"Trailer successfully downloaded and saved to {os.path.join(folder_path, output_filename)}")
+            return 1
+        except Exception as e:
+            log(f"Failed to download trailer: {e}")
+            return 0
 
 
 ############################# LIBRARY PROCESSING #############################
@@ -365,7 +361,7 @@ def main():
 
     # Calling script from command line
     if len(sys.argv) == 1:
-        print("Usage: py DownloadTrailer.py library_root_folder")
+        print("Usage: py TrailerDownloader.py library_root_folder")
         sys.exit(0)
 
     if not os.path.exists(sys.argv[1]):
