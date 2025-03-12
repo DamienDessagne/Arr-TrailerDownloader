@@ -225,7 +225,7 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
         # Download trailer using yt-dlp
         log("Downloading video...")
         ydl_opts = {
-            "outtmpl": os.path.join(TEMP_DIR, f"{title} ({year})-Trailer.%(ext)s"),
+            "outtmpl": os.path.join(TEMP_DIR, f"{title} ({year})-trailer.%(ext)s"),
             "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
         }
 
@@ -239,7 +239,7 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
             output_filename = temp_filename.replace(TEMP_DIR, folder_path)
 
             # Re-encode the video if necessary
-            reencoded_filename = os.path.join(TEMP_DIR, f"{title} ({year})-Trailer-reencoded.mp4")
+            reencoded_filename = os.path.join(TEMP_DIR, f"{title} ({year})-trailer-reencoded.mp4")
             if reencode_video(temp_filename, reencoded_filename):
                 os.remove(temp_filename)
                 temp_filename = reencoded_filename  # Use the re-encoded file
