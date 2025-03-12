@@ -271,7 +271,8 @@ def download_trailers_for_library(library_root_path):
         # Check if the directory already has a trailer
         already_has_trailer = False
         for file_name in os.listdir(dir_path):
-            if file_name.lower().endswith("-trailer.mp4") or file_name.lower().endswith("-trailer.mkv"):
+            base_name, ext = os.path.splitext(file_name)
+            if base_name.lower().endswith("-trailer"):
                 already_has_trailer = True
                 break
 
@@ -325,8 +326,7 @@ def main():
                 sys.exit(1)
             log("Test successful")
 
-        if (os.environ["radarr_eventtype"] == "Download" and os.environ["radarr_isupgrade"] == "False") or os.environ[
-            "radarr_eventtype"] == "Rename":
+        if (os.environ["radarr_eventtype"] == "Download" and os.environ["radarr_isupgrade"] == "False") or os.environ["radarr_eventtype"] == "Rename":
             get_youtube_trailer(
                 os.environ["radarr_movie_title"],
                 os.environ["radarr_movie_year"],
@@ -347,8 +347,7 @@ def main():
                 sys.exit(1)
             log("Test successful")
 
-        if (os.environ["sonarr_eventtype"] == "Download" and os.environ["sonarr_isupgrade"] == "False") or os.environ[
-            "sonarr_eventtype"] == "Rename":
+        if (os.environ["sonarr_eventtype"] == "Download" and os.environ["sonarr_isupgrade"] == "False") or os.environ["sonarr_eventtype"] == "Rename":
             get_youtube_trailer(
                 os.environ["sonarr_series_title"],
                 os.environ["sonarr_series_year"],
