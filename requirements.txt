@@ -1,2 +1,2 @@
-Requests==2.32.3
-yt_dlp==2025.1.26
+Requests==2.32.4
+yt_dlp==2025.6.30
