@@ -204,6 +204,10 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
             title = tmdb_info[f"{"original_title" if is_movie else "original_name"}"]
             log(f"Using original title: {title}")
 
+    # Remove any special character from title that could cause problems with filenames
+    title = re.sub(r'[<>:"/\\|?*]', ' ', title)
+    title = re.sub(r'\s+', ' ', title).strip() # remove multiple spaces
+
     # Search for trailer on YouTube
     yt_query = f"{title} {year} {keywords}"
     yt_query = quote(yt_query)
