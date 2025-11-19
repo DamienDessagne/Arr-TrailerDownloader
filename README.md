@@ -3,7 +3,7 @@ A Python script that downloads trailers from Youtube for a Radarr/Sonarr librari
 
 # Requirements
 - [Python](https://www.python.org/downloads/)
-- [Deno](https://docs.deno.com/runtime/getting_started/installation/) (needed by yt-dlp, see https://github.com/yt-dlp/yt-dlp/wiki/EJS for more info)
+- [Deno](https://docs.deno.com/runtime/getting_started/installation/) (see https://github.com/yt-dlp/yt-dlp/wiki/EJS for more info)
 - [ffmpeg](https://www.ffmpeg.org/): download and add its `bin` folder to your PATH environment variable.
 
 # Installation
