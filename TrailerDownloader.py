@@ -13,6 +13,9 @@ import tempfile
 # Set current directory to script location
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+# Tell yt-dlp to use Deno
+os.environ['YTDLP_JS_ENGINE'] = 'deno'
+
 ############################# CONFIG #############################
 
 # Load configuration from external file
