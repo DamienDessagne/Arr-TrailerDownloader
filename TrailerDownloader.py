@@ -25,6 +25,9 @@ config.read(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini
 # Whether to log everything the script does
 LOG_ACTIVITY = config.getboolean('Config', 'log_activity')
 
+# Max number of log files to keep
+MAX_LOG_FILES = config.getint('Config', 'max_log_files', fallback=10)
+
 # Your TMDB API key, if not provided, language-dependant features won't be activated
 TMDB_API_KEY = config.get('Config', 'tmdb_api_key')
 
@@ -71,13 +74,32 @@ if config.has_section('EncodingParams'):
                 ENCODING_PARAMS[codec_type][target_codec] = {}
             ENCODING_PARAMS[codec_type][target_codec][param] = value
 
-
 ############################# LOG #############################
 
 # Create a new log file
 LOG_FOLDER_NAME = "Logs"
-if LOG_ACTIVITY and not os.path.exists(LOG_FOLDER_NAME):
-    os.makedirs(LOG_FOLDER_NAME)
+if LOG_ACTIVITY:
+    if not os.path.exists(LOG_FOLDER_NAME):
+        os.makedirs(LOG_FOLDER_NAME)
+
+
+    # Clean old logs before creating a new one
+    def clean_old_logs():
+        files = [os.path.join(LOG_FOLDER_NAME, f) for f in os.listdir(LOG_FOLDER_NAME) if
+                 os.path.isfile(os.path.join(LOG_FOLDER_NAME, f))]
+        if len(files) >= MAX_LOG_FILES:
+            # Sort files by modification time (oldest first)
+            files.sort(key=os.path.getmtime)
+            # Remove oldest files to respect the limit (keeping room for the new one)
+            files_to_delete = files[:len(files) - MAX_LOG_FILES + 1]
+            for f in files_to_delete:
+                try:
+                    os.remove(f)
+                except:
+                    pass
+
+
+    clean_old_logs()
 
 LOG_FILE_NAME = datetime.now().strftime("%Y%m%d_%H%M%S") + ".txt"
 LOG_FILE_PATH = os.path.join(LOG_FOLDER_NAME, LOG_FILE_NAME)
