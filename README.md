@@ -115,6 +115,18 @@ mappings =
 ```
 The script logs every path it translates, so if trailers don't appear, look for a `Mapped path ... to ...` line (or the absence of one) in the logs.
 
+## Cookies in Docker
+Cookies are only needed to download age-restricted videos; when they can't be read, the download is simply retried anonymously. `yt_dlp_cookies_browser` (reading cookies straight from an installed browser) can never work in Docker, since no browser is installed in the container. Use `yt_dlp_cookies_file` instead: export a `cookies.txt` from your browser (e.g. with the "Get cookies.txt LOCALLY" extension), mount it in the container, and set `yt_dlp_cookies_file` to its path *inside* the container:
+```yaml
+# docker-compose.yml
+volumes:
+  - ./cookies.txt:/app/cookies.txt
+```
+```ini
+# config.ini
+yt_dlp_cookies_file = /app/cookies.txt
+```
+
 ---
 
 # Adding trailers to an existing library

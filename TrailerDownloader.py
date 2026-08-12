@@ -51,6 +51,9 @@ YOUTUBE_API_KEY = config.get('Config', 'youtube_api_key')
 # Browser name to get cookies from to download from YouTube. See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp for details
 YT_DLP_COOKIES_BROWSER = config.get('Config', 'yt_dlp_cookies_browser')
 
+# Path to a cookies.txt file to download from YouTube. Unlike reading cookies from a browser, this works in Docker.
+YT_DLP_COOKIES_FILE = config.get('Config', 'yt_dlp_cookies_file', fallback='')
+
 # Language-dependant parameters to search for trailers on Youtube
 YOUTUBE_PARAMS = {"default": {
     "use_original_movie_name": config.getboolean('YoutubeParams.default', 'use_original_movie_name'),
@@ -336,13 +339,31 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
             "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
         }
 
+        # Cookies are only needed for age-restricted videos, so each configured source is tried in turn and
+        # an anonymous download is always attempted last. This matters in Docker, where no browser is
+        # installed and reading cookies from one can never succeed.
+        download_attempts = []
+        if YT_DLP_COOKIES_FILE != "":
+            download_attempts.append((f'cookies file "{YT_DLP_COOKIES_FILE}"', {**ydl_opts, "cookiefile": YT_DLP_COOKIES_FILE}))
         if YT_DLP_COOKIES_BROWSER != "":
-            ydl_opts["cookiesfrombrowser"] = (YT_DLP_COOKIES_BROWSER, None, None, None)
+            download_attempts.append((f"cookies from {YT_DLP_COOKIES_BROWSER}", {**ydl_opts, "cookiesfrombrowser": (YT_DLP_COOKIES_BROWSER, None, None, None)}))
+        download_attempts.append(("no cookies", ydl_opts))
+
+        temp_filename = None
+        for attempt_description, attempt_ydl_opts in download_attempts:
+            try:
+                with yt_dlp.YoutubeDL(attempt_ydl_opts) as ydl:
+                    info_dict = ydl.extract_info(f"https://www.youtube.com/watch?v={yt_video_id}", download=True)
+                    temp_filename = ydl.prepare_filename(info_dict)
+                break
+            except Exception as e:
+                log(f"Download using {attempt_description} failed: {e}")
+
+        if temp_filename is None:
+            log("Failed to download trailer.")
+            return 0
 
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info_dict = ydl.extract_info(f"https://www.youtube.com/watch?v={yt_video_id}", download=True)
-                temp_filename = ydl.prepare_filename(info_dict)
             output_filename = temp_filename.replace(TEMP_DIR, folder_path)
 
             # Re-encode the video if necessary
@@ -359,7 +380,7 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
             log(f"Trailer successfully downloaded and saved to {os.path.join(folder_path, output_filename)}")
             return 1
         except Exception as e:
-            log(f"Failed to download trailer: {e}")
+            log(f"Failed to save trailer: {e}")
             return 0
 
 
