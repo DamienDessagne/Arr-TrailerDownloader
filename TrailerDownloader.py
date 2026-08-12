@@ -346,7 +346,10 @@ def get_youtube_trailer(title, year, folder_path, tmdb_id, is_movie):
         if YT_DLP_COOKIES_FILE != "":
             download_attempts.append((f'cookies file "{YT_DLP_COOKIES_FILE}"', {**ydl_opts, "cookiefile": YT_DLP_COOKIES_FILE}))
         if YT_DLP_COOKIES_BROWSER != "":
-            download_attempts.append((f"cookies from {YT_DLP_COOKIES_BROWSER}", {**ydl_opts, "cookiesfrombrowser": (YT_DLP_COOKIES_BROWSER, None, None, None)}))
+            # Optionally read from a specific profile directory instead of the browser's default location,
+            # e.g. a Firefox profile folder mounted read-only into a Docker container. Syntax: "firefox:/path".
+            browser_name, _, profile_path = YT_DLP_COOKIES_BROWSER.partition(":")
+            download_attempts.append((f"cookies from {YT_DLP_COOKIES_BROWSER}", {**ydl_opts, "cookiesfrombrowser": (browser_name, profile_path or None, None, None)}))
         download_attempts.append(("no cookies", ydl_opts))
 
         temp_filename = None

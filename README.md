@@ -116,7 +116,27 @@ mappings =
 The script logs every path it translates, so if trailers don't appear, look for a `Mapped path ... to ...` line (or the absence of one) in the logs.
 
 ## Cookies in Docker
-Cookies are only needed to download age-restricted videos; when they can't be read, the download is simply retried anonymously. `yt_dlp_cookies_browser` (reading cookies straight from an installed browser) can never work in Docker, since no browser is installed in the container. Use `yt_dlp_cookies_file` instead: export a `cookies.txt` from your browser (e.g. with the "Get cookies.txt LOCALLY" extension), mount it in the container, and set `yt_dlp_cookies_file` to its path *inside* the container:
+Cookies are only needed to download age-restricted videos; when they can't be read, the download is simply retried anonymously. No browser is installed in the container, so `yt_dlp_cookies_browser` as-is (just a browser name) can never work there. Two ways around that:
+
+**Option A: mount your Firefox profile (recommended, no re-export needed)**
+
+`yt-dlp` doesn't need a running browser, it only reads its cookie database file — and for Firefox specifically (unlike Chrome-based browsers), that file isn't encrypted by Windows, so it can be read straight from a mounted copy. This keeps working indefinitely, picking up fresh cookies as you keep browsing normally on your machine.
+
+1. Find your Firefox profile folder: open `about:support` in Firefox, "Profile Folder" row, e.g. `C:\Users\you\AppData\Roaming\Mozilla\Firefox\Profiles\xxxxxxxx.default-release`.
+2. Mount it read-only in `docker-compose.yml`:
+```yaml
+volumes:
+  - "C:/Users/you/AppData/Roaming/Mozilla/Firefox/Profiles/xxxxxxxx.default-release:/cookies/firefox-profile:ro"
+```
+3. In `config.ini`, append the in-container path after a colon:
+```ini
+yt_dlp_cookies_browser = firefox:/cookies/firefox-profile
+```
+This only works for Firefox: Chrome-based browsers encrypt their cookies using Windows' credential store, which a Linux container can't reach.
+
+**Option B: export a cookies.txt file**
+
+Works with any browser, but has to be re-exported whenever it goes stale (YouTube session cookies eventually expire). Export one with an extension like "Get cookies.txt LOCALLY", mount it, and point `yt_dlp_cookies_file` to it:
 ```yaml
 # docker-compose.yml
 volumes:
