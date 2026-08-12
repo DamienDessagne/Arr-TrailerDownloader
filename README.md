@@ -28,49 +28,92 @@ pip install -r requirements.txt
 
 ---
 
-# Mode 1: Custom Script
-The script is launched by Radarr/Sonarr each time an event happens. This requires Radarr/Sonarr to be able to run the script directly, so it only works if they are **not** running in Docker and share the same filesystem as the script.
+# Notification triggers (all modes)
+Whichever mode you use, the connection is created from the same place in Radarr and in Sonarr: `Settings -> Connect -> + -> ...`, and the same **Notification Triggers** apply. Only two of them matter:
 
-In your Radarr/Sonarr interface, create a new Custom Script connection (`Settings -> Connect -> + -> Custom Script`) that triggers on import and on rename. In `Path`, enter the path to your local copy of `TrailerDownloader.py` (e.g., `C:\Arr-TrailerDownloader\TrailerDownloader.py`). If clicking the Test button works, the script will work.
+| Trigger | Tick it? | Why |
+|---|---|---|
+| **On Import** (called *On Download* in older versions) | **Yes** | The event that actually matters: a movie/episode was just imported, so its folder now needs a trailer. |
+| **On Rename** | **Yes** | The trailer is saved as `{Title} ({Year})-trailer.ext` next to your media. Re-running the script after a rename keeps a trailer in the renamed folder. |
+| **On Upgrade** | No | Fired when an existing file is replaced by a better version. The folder already has its trailer, so the script deliberately ignores these events. Ticking it only causes runs that do nothing. |
+| Any other trigger (On Grab, On Health Issue, On Series Add, ...) | No | Not handled. They are ignored, but they wake the script up for nothing. |
+
+The script also answers Radarr/Sonarr's **Test** button: it succeeds only if you filled in your Youtube API key in `config.ini`, so a successful test means the setup is correct.
+
+**Radarr vs Sonarr**: nothing to configure differently, the same script handles both. The only functional difference is that Radarr provides the TMDB id of the movie directly, while for a TV show the script looks it up on TMDB from the title and year (which only matters if you set a TMDB API key to enable the language-dependant features).
+
+---
+
+# Mode 1: Custom Script
+Radarr/Sonarr launch the script themselves, once per event. This requires them to be able to run the script directly, so it only works if they are **not** running in Docker and share the same filesystem as the script.
+
+1. In Radarr: `Settings -> Connect -> + -> Custom Script`.
+2. `Name`: whatever you like, e.g. `Trailer Downloader`.
+3. Tick **On Import** and **On Rename** (see [Notification triggers](#notification-triggers-all-modes)).
+4. `Path`: the full path to your local copy of `TrailerDownloader.py`, e.g. `C:\Arr-TrailerDownloader\TrailerDownloader.py`.
+5. Click **Test**. If it succeeds, save.
+6. Repeat the exact same steps in Sonarr.
+
+Nothing else to configure: Radarr/Sonarr pass the title, year and folder of the imported item to the script through environment variables, so there are no paths to map.
+
+> On Windows, Radarr runs the `.py` file through the file association created by the Python installer. If the Test button fails with a permission or "not executable" error, the usual fix is to make sure Python is installed for all users and that `.py` files are associated with it.
 
 # Mode 2: Server
-The script stays running in the background and waits for Radarr/Sonarr to notify it over HTTP. Radarr/Sonarr only need to be able to reach it over the network, so this works even when they run in Docker or on another machine.
+The script stays running in the background and waits for Radarr/Sonarr to notify it over HTTP. They only need to be able to reach it over the network, so this works even when they run in Docker or on another machine.
 
-- Configure the `[Server]` section of `config.ini` (listening address, port, and optional credentials).
-- Start the server with `run_server.bat` on Windows, or `run_server.sh` on Linux. Leave it running.
-- In your Radarr/Sonarr interface, create a new **Webhook** connection (`Settings -> Connect -> + -> Webhook`) that triggers on import and on rename:
-  - `URL`: `http://ADDRESS_OF_THE_MACHINE_RUNNING_THE_SCRIPT:8189/` (if Radarr runs in Docker on the same machine, `http://host.docker.internal:8189/` usually works)
-  - `Method`: `POST`
-  - `Username` / `Password`: only if you set them in the `[Server]` section of `config.ini`
-- Click Test: it should succeed, and the server should log `Test successful`.
+**Start the server:**
+1. Configure the `[Server]` section of `config.ini` (listening address, port, and optional credentials).
+2. Run `run_server.bat` on Windows, or `run_server.sh` on Linux, and leave it running. It should print `Listening for Radarr/Sonarr webhooks on http://0.0.0.0:8189`.
+3. To start it automatically with your machine, create a scheduled task (Windows) or a systemd service (Linux) calling that same script.
 
-If Radarr/Sonarr see your libraries under different paths than the script does, fill in the `[PathMappings]` section of `config.ini` (see [Path mappings](#path-mappings)).
+**Connect Radarr/Sonarr to it:**
+1. In Radarr: `Settings -> Connect -> + -> Webhook`.
+2. `Name`: whatever you like, e.g. `Trailer Downloader`.
+3. Tick **On Import** and **On Rename**.
+4. `URL`: see [Which URL should I use?](#which-url-should-i-use) below.
+5. `Method`: `POST`.
+6. `Username` / `Password`: leave empty, unless you set them in the `[Server]` section of `config.ini`.
+7. Click **Test**: it should succeed, and the server should print `Test successful`.
+8. Repeat the exact same steps in Sonarr.
 
-To start the server automatically with your machine, create a scheduled task (Windows) or a systemd service (Linux) calling the same script.
+Finally, check [Path mappings](#path-mappings): unlike the Custom Script mode, Radarr/Sonarr now send **paths**, which have to be valid for the script too.
 
 # Mode 3: Docker
 Same as the Server mode, but Python, Deno and ffmpeg are already installed inside the image, so there is nothing to install on your machine.
 
-- Copy `config.ini` next to `docker-compose.yml` and fill in your API keys.
-- Edit the `volumes` section of `docker-compose.yml` to point to your libraries.
-- Start it:
+1. Copy `config.ini` next to `docker-compose.yml` and fill in your API keys.
+2. Edit the `volumes` section of `docker-compose.yml` so your libraries are visible to the container. **Mount them at the same paths Radarr/Sonarr use**, otherwise you'll need [Path mappings](#path-mappings).
+3. Start it:
 ```
 docker compose up -d
 ```
-- In your Radarr/Sonarr interface, create a **Webhook** connection exactly as described in [Mode 2](#mode-2-server), using:
-  - `http://trailerdownloader:8189/` if Radarr/Sonarr run in Docker on the same Docker network
-  - `http://ADDRESS_OF_THE_DOCKER_HOST:8189/` otherwise
+4. Check that it started with `docker compose logs -f`.
+5. Create the **Webhook** connection in Radarr and Sonarr exactly as described in [Mode 2](#mode-2-server).
+
+## Which URL should I use?
+The URL to enter in the Webhook connection depends on where Radarr/Sonarr run *relative to the script*. `8189` is the default port from `config.ini`.
+
+| Radarr/Sonarr run... | ...and the script runs... | URL to use |
+|---|---|---|
+| In Docker | In Docker, same Docker network | `http://trailerdownloader:8189/` (the container name) |
+| In Docker | Directly on the same machine | `http://host.docker.internal:8189/` |
+| Directly on the machine | In Docker on that same machine | `http://localhost:8189/` |
+| Directly on the machine | Directly on that same machine | `http://localhost:8189/` (but [Mode 1](#mode-1-custom-script) is simpler) |
+| On another machine | Anywhere | `http://IP_OF_THE_MACHINE_RUNNING_THE_SCRIPT:8189/` |
+
+If Radarr/Sonarr are on another machine, also make sure `host` is set to `0.0.0.0` in `config.ini` (the default) so the server accepts connections from outside, and that your firewall allows the port. Setting a `username`/`password` is recommended in that case.
 
 ## Path mappings
-This is the most common source of problems in Server and Docker modes: Radarr/Sonarr send the path of the imported item, but that path must also be valid **for this script**.
+This is the most common source of problems in Server and Docker modes: Radarr/Sonarr send the path of the imported item, and that path must also be valid **for this script**. A Radarr in Docker typically reports `/movies/Blade Runner (1982)`, which means nothing to a script running on Windows.
 
-The simplest solution is to mount your libraries at the same paths in both containers. When that isn't possible, declare the differences in the `[PathMappings]` section of `config.ini`. For instance, if Radarr sees your movies in `/movies` while this script sees them in `D:\Movies`:
+The simplest solution is to mount your libraries at the same paths everywhere. When that isn't possible, declare the differences in the `[PathMappings]` section of `config.ini`. For instance, if Radarr sees your movies in `/movies` while this script sees them in `D:\Movies`:
 ```ini
 [PathMappings]
 mappings =
     /movies -> D:\Movies
     /tv -> D:\TV Shows
 ```
+The script logs every path it translates, so if trailers don't appear, look for a `Mapped path ... to ...` line (or the absence of one) in the logs.
 
 ---
 
