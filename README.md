@@ -26,6 +26,5 @@ If your library is using a different naming convention, you will need to edit th
 # Have Radarr/Sonarr automatically grab trailers
 In your Radarr/Sonarr interface, create a new Custom Script connection (`Settings -> Connect -> + -> Custom Script`) that triggers on import and on rename. In `Path`, enter the path to your local copy of `TrailerDownloader.py` (e.g., `C:\Arr-TrailerDownloader\TrailerDownloader.py`). If clicking the Test button works, the script will work.
 
-# Update libraries
-Downloading from YouTube requires up-to-date libraries. If the script fails to grab trailers consistently, it's probably because YouTube changed its protection algorithm, and libraries need to be updated. In this case, run `update_libs.bat` on Windows, or `update_libs.sh` on Linux.
-Scheduling a task or a cron job to call this script and update libraries periodically is recommended.
+# Automatic dependency updates
+Downloading from YouTube requires up-to-date libraries, since YouTube regularly changes its protection algorithm. By default, the script automatically upgrades its dependencies (`yt-dlp`, `yt-dlp-ejs`, `Requests`) before running, at most once every `auto_update_libs_interval_minutes` (default: 60) so it doesn't slow down every single launch. This behavior can be configured (or disabled) in `config.ini`, under the `auto_update_libs` and `auto_update_libs_interval_minutes` settings.

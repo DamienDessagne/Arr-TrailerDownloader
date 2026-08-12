@@ -2,10 +2,8 @@ import os
 import re
 import shutil
 import sys
-import requests
 from urllib.parse import quote
 from datetime import datetime
-import yt_dlp
 import configparser
 import subprocess
 import tempfile
@@ -27,6 +25,12 @@ LOG_ACTIVITY = config.getboolean('Config', 'log_activity')
 
 # Max number of log files to keep
 MAX_LOG_FILES = config.getint('Config', 'max_log_files', fallback=10)
+
+# Whether to automatically keep dependencies (yt-dlp, yt-dlp-ejs, Requests) up to date
+AUTO_UPDATE_LIBS = config.getboolean('Config', 'auto_update_libs', fallback=True)
+
+# Minimum number of minutes between two automatic dependency updates
+AUTO_UPDATE_LIBS_INTERVAL_MINUTES = config.getint('Config', 'auto_update_libs_interval_minutes', fallback=60)
 
 # Your TMDB API key, if not provided, language-dependant features won't be activated
 TMDB_API_KEY = config.get('Config', 'tmdb_api_key')
@@ -112,6 +116,44 @@ def log(log_text):
         with open(LOG_FILE_PATH, "a", encoding="utf-8") as log_file:
             log_file.write(log_text + "\n")
 
+
+############################# AUTO UPDATE #############################
+
+# File used to remember when dependencies were last auto-updated
+LIB_UPDATE_MARKER_FILE = ".last_lib_update"
+
+
+# Upgrades yt-dlp, yt-dlp-ejs and Requests via pip, at most once every AUTO_UPDATE_LIBS_INTERVAL_MINUTES,
+# so the script keeps working when YouTube changes its protections without requiring manual maintenance.
+def update_libs_if_needed():
+    if not AUTO_UPDATE_LIBS:
+        return
+
+    if os.path.exists(LIB_UPDATE_MARKER_FILE):
+        elapsed_minutes = (datetime.now() - datetime.fromtimestamp(os.path.getmtime(LIB_UPDATE_MARKER_FILE))).total_seconds() / 60
+        if elapsed_minutes < AUTO_UPDATE_LIBS_INTERVAL_MINUTES:
+            return
+
+    log("Checking for dependency updates...")
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "-r", "requirements.txt"],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+        )
+        log("Dependencies are up to date.")
+    except subprocess.CalledProcessError as e:
+        log(f"Failed to update dependencies: {e.stderr.decode(errors='ignore')}")
+
+    # Touch the marker file even on failure, so a persistently failing update doesn't slow down every launch
+    open(LIB_UPDATE_MARKER_FILE, "a").close()
+    os.utime(LIB_UPDATE_MARKER_FILE, None)
+
+
+update_libs_if_needed()
+
+# Imported only after the update check above, so a freshly-upgraded version is picked up within the same run
+import requests
+import yt_dlp
 
 ############################# JSON #############################
 
