@@ -24,7 +24,10 @@ os.environ['YTDLP_JS_ENGINE'] = 'deno'
 
 # Load configuration from external file
 CONFIG_FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini')
-config = configparser.ConfigParser()
+# By default configparser also accepts ':' as a key/value separator, which breaks EncodingParams entries for
+# ffmpeg options that contain a colon themselves, e.g. `video.hevc_nvenc.b:v = 0` (silently parsed as a "b"
+# key with value "v = 0"). Restrict it to '=' only so such option names work as expected.
+config = configparser.ConfigParser(delimiters=('=',))
 if not config.read(CONFIG_FILE_PATH):
     print(f"ERROR: no configuration file found at {CONFIG_FILE_PATH}.")
     print("Copy config.ini from the repository next to the script (or mount it there in Docker) and fill in your API keys.")
