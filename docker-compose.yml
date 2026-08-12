@@ -1,0 +1,19 @@
+services:
+  trailerdownloader:
+    build: .
+    container_name: trailerdownloader
+    restart: unless-stopped
+    ports:
+      # Only needed to reach the server from outside the Docker network (e.g. from a Radarr running on the host).
+      # If Radarr/Sonarr run in Docker alongside this container, they can reach it at http://trailerdownloader:8189
+      # and this section can be removed.
+      - "8189:8189"
+    volumes:
+      # Your configuration and API keys. Copy config.ini from the repository next to this file first.
+      - ./config.ini:/app/config.ini
+      # Optional, to keep the logs readable from the host
+      - ./Logs:/app/Logs
+      # Your libraries. IMPORTANT: use the same paths Radarr/Sonarr use, or declare the differences
+      # in the [PathMappings] section of config.ini.
+      - /path/to/your/movies:/movies
+      - /path/to/your/tv:/tv

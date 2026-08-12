@@ -1,7 +1,13 @@
+import base64
+import hmac
+import json
 import os
+import queue
 import re
 import shutil
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import quote
 from datetime import datetime
 import configparser
@@ -17,8 +23,12 @@ os.environ['YTDLP_JS_ENGINE'] = 'deno'
 ############################# CONFIG #############################
 
 # Load configuration from external file
+CONFIG_FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini')
 config = configparser.ConfigParser()
-config.read(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini'))
+if not config.read(CONFIG_FILE_PATH):
+    print(f"ERROR: no configuration file found at {CONFIG_FILE_PATH}.")
+    print("Copy config.ini from the repository next to the script (or mount it there in Docker) and fill in your API keys.")
+    sys.exit(1)
 
 # Whether to log everything the script does
 LOG_ACTIVITY = config.getboolean('Config', 'log_activity')
@@ -78,6 +88,21 @@ if config.has_section('EncodingParams'):
                 ENCODING_PARAMS[codec_type][target_codec] = {}
             ENCODING_PARAMS[codec_type][target_codec][param] = value
 
+# Server mode parameters (only used when the script is started with --serve)
+SERVER_HOST = config.get('Server', 'host', fallback='0.0.0.0')
+SERVER_PORT = config.getint('Server', 'port', fallback=8189)
+SERVER_USERNAME = config.get('Server', 'username', fallback='')
+SERVER_PASSWORD = config.get('Server', 'password', fallback='')
+
+# Path mappings, to translate the paths sent by Radarr/Sonarr into paths this script can actually reach.
+# Stored as a list of (path_seen_by_arr, path_seen_by_this_script) tuples.
+PATH_MAPPINGS = []
+for mapping_line in config.get('PathMappings', 'mappings', fallback='').splitlines():
+    mapping_line = mapping_line.strip()
+    if '->' in mapping_line:
+        arr_path, local_path = mapping_line.split('->', 1)
+        PATH_MAPPINGS.append((arr_path.strip(), local_path.strip()))
+
 ############################# LOG #############################
 
 # Create a new log file
@@ -109,12 +134,17 @@ LOG_FILE_NAME = datetime.now().strftime("%Y%m%d_%H%M%S") + ".txt"
 LOG_FILE_PATH = os.path.join(LOG_FOLDER_NAME, LOG_FILE_NAME)
 
 
+# Serializes writes, as server mode logs from several threads at once
+LOG_LOCK = threading.Lock()
+
+
 # Echoes the given text and appends the given text to the log file's content
 def log(log_text):
-    print(log_text)
-    if LOG_ACTIVITY:
-        with open(LOG_FILE_PATH, "a", encoding="utf-8") as log_file:
-            log_file.write(log_text + "\n")
+    with LOG_LOCK:
+        print(log_text, flush=True)
+        if LOG_ACTIVITY:
+            with open(LOG_FILE_PATH, "a", encoding="utf-8") as log_file:
+                log_file.write(log_text + "\n")
 
 
 ############################# AUTO UPDATE #############################
@@ -125,28 +155,34 @@ LIB_UPDATE_MARKER_FILE = ".last_lib_update"
 
 # Upgrades yt-dlp, yt-dlp-ejs and Requests via pip, at most once every AUTO_UPDATE_LIBS_INTERVAL_MINUTES,
 # so the script keeps working when YouTube changes its protections without requiring manual maintenance.
+# Returns True if a dependency was actually upgraded (which server mode uses to know it should restart).
 def update_libs_if_needed():
     if not AUTO_UPDATE_LIBS:
-        return
+        return False
 
     if os.path.exists(LIB_UPDATE_MARKER_FILE):
         elapsed_minutes = (datetime.now() - datetime.fromtimestamp(os.path.getmtime(LIB_UPDATE_MARKER_FILE))).total_seconds() / 60
         if elapsed_minutes < AUTO_UPDATE_LIBS_INTERVAL_MINUTES:
-            return
+            return False
 
+    upgraded = False
     log("Checking for dependency updates...")
     try:
-        subprocess.run(
+        result = subprocess.run(
             [sys.executable, "-m", "pip", "install", "--upgrade", "-r", "requirements.txt"],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-        log("Dependencies are up to date.")
+        # pip only prints this line when it actually installed a new version
+        upgraded = "Successfully installed" in result.stdout.decode(errors='ignore')
+        log("Dependencies upgraded." if upgraded else "Dependencies are up to date.")
     except subprocess.CalledProcessError as e:
         log(f"Failed to update dependencies: {e.stderr.decode(errors='ignore')}")
 
     # Touch the marker file even on failure, so a persistently failing update doesn't slow down every launch
     open(LIB_UPDATE_MARKER_FILE, "a").close()
     os.utime(LIB_UPDATE_MARKER_FILE, None)
+
+    return upgraded
 
 
 update_libs_if_needed()
@@ -383,10 +419,170 @@ def download_trailers_for_library(library_root_path):
     log(f"Successfully downloaded {downloaded_trailers_count} new trailers.")
 
 
+############################# WEBHOOK SERVER #############################
+
+# Radarr/Sonarr event types that should trigger a trailer download
+TRAILER_EVENT_TYPES = ("Download", "Rename")
+
+# Downloads are queued and handled by a single worker thread, so a burst of imports doesn't start
+# several yt-dlp downloads in parallel.
+JOB_QUEUE = queue.Queue()
+
+
+# Translates a path as seen by Radarr/Sonarr into a path this script can actually reach, using PATH_MAPPINGS.
+# Returns the path unchanged when no mapping matches, which is the common case when both run on the same host.
+def map_path(arr_path):
+    if arr_path is None:
+        return None
+
+    for arr_prefix, local_prefix in PATH_MAPPINGS:
+        if arr_path.startswith(arr_prefix):
+            # Re-join the remaining parts using the local platform's separator, as Radarr/Sonarr may use the other one
+            suffix = arr_path[len(arr_prefix):].replace("\\", "/").strip("/")
+            mapped_path = os.path.join(local_prefix, *suffix.split("/")) if suffix else local_prefix
+            log(f'Mapped path "{arr_path}" to "{mapped_path}"')
+            return mapped_path
+
+    return arr_path
+
+
+# Turns a Radarr/Sonarr webhook payload into the arguments get_youtube_trailer expects.
+# Returns None when the payload describes an event that shouldn't trigger a download.
+def build_trailer_job(payload):
+    event_type = payload.get("eventType")
+
+    if event_type not in TRAILER_EVENT_TYPES:
+        log(f'Ignoring "{event_type}" event')
+        return None
+
+    # An upgrade replaces an existing file, so the trailer has already been downloaded
+    if event_type == "Download" and payload.get("isUpgrade", False):
+        log("Ignoring the upgrade of an already imported item")
+        return None
+
+    if "movie" in payload:
+        movie = payload["movie"]
+        return movie.get("title"), movie.get("year"), map_path(movie.get("folderPath")), movie.get("tmdbId"), True
+
+    if "series" in payload:
+        series = payload["series"]
+        return series.get("title"), series.get("year"), map_path(series.get("path")), None, False
+
+    log("Payload contains neither a movie nor a series, ignoring")
+    return None
+
+
+# Worker loop consuming the download queue, run in a background thread by run_server()
+def process_jobs():
+    while True:
+        job = JOB_QUEUE.get()
+        try:
+            get_youtube_trailer(*job)
+        except Exception as e:
+            log(f'Failed to download a trailer for "{job[0]}": {e}')
+        finally:
+            JOB_QUEUE.task_done()
+
+        # Take advantage of being idle to refresh dependencies. Since yt_dlp is already imported at this point,
+        # the process has to restart for the new version to actually be used.
+        if JOB_QUEUE.empty() and update_libs_if_needed():
+            log("Restarting to load the newly installed dependencies...")
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+class WebhookRequestHandler(BaseHTTPRequestHandler):
+    # Route the built-in HTTP logging into our own log file
+    def log_message(self, format, *args):
+        log(f"{self.address_string()} - {format % args}")
+
+    def send_text_response(self, status_code, message):
+        body = message.encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    # Checks the credentials configured in the [Server] section, matching the webhook connection's Username/Password
+    def is_authorized(self):
+        if SERVER_USERNAME == "" and SERVER_PASSWORD == "":
+            return True
+
+        auth_header = self.headers.get("Authorization", "")
+        if not auth_header.startswith("Basic "):
+            return False
+
+        try:
+            username, _, password = base64.b64decode(auth_header[len("Basic "):]).decode("utf-8").partition(":")
+        except Exception:
+            return False
+
+        # compare_digest avoids leaking the expected credentials through response timing
+        return hmac.compare_digest(username, SERVER_USERNAME) and hmac.compare_digest(password, SERVER_PASSWORD)
+
+    # Health check, also handy to confirm from a browser that the server is reachable
+    def do_GET(self):
+        if self.path.split("?")[0] in ("/", "/health"):
+            self.send_text_response(200, "Arr-TrailerDownloader is running")
+        else:
+            self.send_text_response(404, "Not found")
+
+    def do_POST(self):
+        if not self.is_authorized():
+            log("Rejected a request with missing or invalid credentials")
+            self.send_text_response(401, "Unauthorized")
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as e:
+            log(f"Received an invalid webhook payload: {e}")
+            self.send_text_response(400, "Invalid JSON payload")
+            return
+
+        # Radarr/Sonarr's "Test" button
+        if payload.get("eventType") == "Test":
+            if YOUTUBE_API_KEY == "YOUR_API_KEY":
+                log("Please insert your Youtube API key for the script to work")
+                self.send_text_response(500, "Missing Youtube API key, see config.ini")
+                return
+            log("Test successful")
+            self.send_text_response(200, "Test successful")
+            return
+
+        job = build_trailer_job(payload)
+        if job is None:
+            self.send_text_response(200, "Nothing to do")
+            return
+
+        # Answer right away, as downloading takes far longer than Radarr/Sonarr are willing to wait
+        JOB_QUEUE.put(job)
+        log(f'Queued a trailer download for "{job[0]}" ({JOB_QUEUE.qsize()} job(s) pending)')
+        self.send_text_response(202, "Trailer download queued")
+
+
+def run_server():
+    threading.Thread(target=process_jobs, daemon=True).start()
+
+    server = ThreadingHTTPServer((SERVER_HOST, SERVER_PORT), WebhookRequestHandler)
+    log(f"Listening for Radarr/Sonarr webhooks on http://{SERVER_HOST}:{SERVER_PORT}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        log("Shutting down")
+        server.shutdown()
+
+
 ############################# MAIN #############################
 
 
 def main():
+    # Running as a webhook server (Docker, run_server.bat, run_server.sh)
+    if "--serve" in sys.argv:
+        run_server()
+        return
+
     # Calling script from Radarr
     if "radarr_eventtype" in os.environ:
         log("Script triggered from Radarr")
@@ -431,7 +627,9 @@ def main():
 
     # Calling script from command line
     if len(sys.argv) == 1:
-        print("Usage: py TrailerDownloader.py library_root_folder")
+        print("Usage:")
+        print("  py TrailerDownloader.py library_root_folder   Download the missing trailers of an existing library")
+        print("  py TrailerDownloader.py --serve               Listen for Radarr/Sonarr webhooks (see [Server] in config.ini)")
         sys.exit(0)
 
     if not os.path.exists(sys.argv[1]):

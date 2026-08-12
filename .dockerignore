@@ -1,0 +1,11 @@
+.git
+.gitignore
+.idea
+Logs
+.last_lib_update
+CLAUDE.md
+README.md
+LICENSE
+docker-compose.yml
+run_server.bat
+run_server.sh

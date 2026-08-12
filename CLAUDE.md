@@ -5,20 +5,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A single-file Python script (`TrailerDownloader.py`) that downloads movie/TV trailers from YouTube for
-Radarr/Sonarr libraries. It runs either as a Radarr/Sonarr Custom Script (triggered via env vars on
-import/rename events) or standalone from the command line against a library root folder.
+Radarr/Sonarr libraries. It supports three interchangeable ways of being triggered, all sharing the same
+`config.ini` and the same download logic:
+
+1. **Custom Script** — Radarr/Sonarr launch the script once per event, passing data via env vars (`radarr_*`/`sonarr_*`).
+2. **Server** (`--serve`) — long-running HTTP server receiving Radarr/Sonarr *Webhook* JSON payloads.
+3. **Docker** — the same server mode, packaged with Python/Deno/ffmpeg (`Dockerfile`, `docker-compose.yml`).
+
+Plus a standalone CLI mode (`py TrailerDownloader.py <library_root>`) to backfill an existing library.
 
 There is no package structure, no build step, and no test suite — it's meant to be run directly with `py`/`python3`.
 
 ## Commands
 
-- Run against a library folder: `py .\TrailerDownloader.py PATH_TO_LIBRARY_ROOT_FOLDER`
+- Backfill a library folder: `py .\TrailerDownloader.py PATH_TO_LIBRARY_ROOT_FOLDER`
+- Run the webhook server: `py .\TrailerDownloader.py --serve` (or `run_server.bat` / `run_server.sh`)
 - Install dependencies: `pip install -r requirements.txt`
+- Docker: `docker compose up -d` (Docker was NOT available on the machine where this was written — the image
+  has never been build-tested, treat it as unverified).
 - No linter, formatter, or test suite is configured in this repo.
 - Dependencies (`yt-dlp`, `yt-dlp-ejs`, `Requests`) are auto-upgraded by the script itself at startup (see
   AUTO UPDATE section below) — there's no separate update script to run manually.
 - To sanity-check a change, run the script against a small local test library folder (or a single subfolder)
   and inspect stdout / the generated `Logs/*.txt` file (only created if `log_activity = True` in `config.ini`).
+- To sanity-check server mode without Radarr, POST a payload at it, e.g.
+  `curl -X POST http://127.0.0.1:8189/ -d '{"eventType":"Test"}'`. Real event payloads look like
+  `{"eventType":"Download","isUpgrade":false,"movie":{"title":..,"year":..,"folderPath":..,"tmdbId":..}}`
+  (Sonarr sends `series` with `path`/`tvdbId` instead).
 
 ## Architecture
 
@@ -46,8 +59,17 @@ Everything lives in `TrailerDownloader.py`, organized into clearly-delimited `##
 7. **LIBRARY PROCESSING** — `download_trailers_for_library()` walks immediate subfolders of a library root,
    skips folders that already have a `*-trailer.*` file, and parses folder names to extract title/year (and
    TVDB id for TV, or TMDB id from an existing video filename for movies) before calling `get_youtube_trailer()`.
-8. **MAIN** — dispatches based on how the script was invoked: Radarr env vars (`radarr_eventtype`, ...), Sonarr
-   env vars (`sonarr_eventtype`, ...), or a CLI arg (library root path).
+8. **WEBHOOK SERVER** — server mode. `build_trailer_job()` normalizes a Radarr/Sonarr webhook JSON payload into
+   the same 5-tuple `get_youtube_trailer()` takes; `map_path()` applies `[PathMappings]` so paths sent by a
+   containerized Radarr resolve locally. Requests are answered immediately (202) and jobs go through
+   `JOB_QUEUE`, drained by a single worker thread (`process_jobs`) so downloads stay serialized. Optional HTTP
+   Basic auth matches the Username/Password fields of the *arr Webhook connection. Between jobs the worker
+   re-checks dependencies and `os.execv`s itself if something was upgraded.
+9. **MAIN** — dispatches based on how the script was invoked: `--serve`, Radarr env vars (`radarr_eventtype`,
+   ...), Sonarr env vars (`sonarr_eventtype`, ...), or a CLI arg (library root path).
+
+The two trigger paths (env vars vs webhook payload) must stay behaviorally aligned: both act only on
+`Download` (when not an upgrade) and `Rename`, and both validate the API key on `Test`.
 
 ### Folder naming conventions this script depends on
 

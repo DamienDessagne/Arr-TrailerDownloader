@@ -5,3 +5,6 @@ Logs
 Logs/
 Logs/*
 .last_lib_update
+__pycache__
+__pycache__/
+__pycache__/*
